@@ -1,4 +1,5 @@
 # devaplot
+[![GPL Licence](https://badges.frapsoft.com/os/gpl/gpl.png?v=103)](https://opensource.org/licenses/GPL-3.0/)
 ## Dependencies
 matplotlib  
 numpy  
@@ -38,5 +39,5 @@ optional arguments:
                         Save aboslute variant table to STR. Use '' for STDOUT (default: None)
   -d INT, --depth INT   Depth of position to report variant (default: 20)
 ```
-## License
-[GNU General Public License 3.0](https://www.gnu.org/licenses/gpl-3.0.en.html)
+##
+GPL-3.0 badge created by [ellerbrock/open-source-badges](https://github.com/ellerbrock/open-source-badges)

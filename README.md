@@ -6,8 +6,9 @@ pandas
 ## Usage
 
 ```
-usage: devaplot.py [-h] [-M FLOAT] [-m FLOAT] [-e INT] [-f STR] [-F] [-l] [-D INT] [-s FLOAT,FLOAT]
-                   [-g INT,INT[,INT,INT[,INT,INT,...]]] [-x X_TICK] [-t STR] [-T STR] [-d INT] vcf_file
+usage: devaplot.py [-h] [-M FLOAT] [-m FLOAT] [-e INT] [-f STR] [-F] [-l] [-D INT] 
+                   [-s FLOAT,FLOAT] [-g INT,INT[,INT,INT[,INT,INT,...]]] [-x X_TICK]
+                   [-t STR] [-T STR] [-d INT] vcf_file
 
 Plot genome depth with nucleotide polymorphisms
 

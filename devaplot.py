@@ -6,6 +6,8 @@ import os
 import sys
 import numpy as np
 import pandas as pd
+
+
 from matplotlib import pyplot as plt
 
 def get_args():
@@ -201,77 +203,51 @@ def get_args():
 def parse_vcf(vcf_file):
     """
     Read VCF file and return vcf dataframe
-    Extract only pos, ref, alt, and AD in info column
+    Extract pos, ref, alt, and DP4
     """
-    vcf_lines = [line.rstrip().split() for line in vcf_file if line[0] != '#']
+    vcf_lines = [line.rstrip().split() for line in vcf_file if line[0] != '#' and "INDEL" not in line]
     pos = [int(line[1]) for line in vcf_lines]
     refs = [line[3] for line in vcf_lines]
-    alts = [line[4].split(',') for line in vcf_lines] # nested list`
-    ad_pos = vcf_lines[0][8].split(':')
-    ad_pos = ad_pos.index('AD')
-    ads = [
-            [int(x) for x in line[9].split(':')[ad_pos].split(',')[:-1]]
-            for line in vcf_lines] # nested list
+    alts = [line[4].split(',') for line in vcf_lines] # nested list
+    info = [dict(
+            [j if len(j)==2 else j+[""] for j in map(lambda i: str.split(i, "="), line[7].split(";"))]
+            ) for line in vcf_lines
+            ]
+    af = [line["AF"] for line in info]
     vcf_df = pd.DataFrame({
             'pos': pos,
             'ref': refs,
             'alt': alts,
-            'ads': ads,
+            'af': af,
             })
+    vcf_df["af"] = pd.to_numeric(vcf_df["af"])
     return vcf_df
 
 
-def find_variants(freq_list, major_threshold=0.2, depth=20):
-    """Return Boolean value if proportion of variant >= threshold"""
-    total = sum(freq_list)
-    if total < depth:
-        return False
-    variant_sum = sum(freq_list[1:])
-    return variant_sum/total > major_threshold # make parameter
+def add_gaps(depth_df, gaps):
+    """
+    Add regions with depth = 0 from a list of gaps and return updated DataFrame
+    Parameters
+    ----------
+    depth_df    DataFrame with ["id", "pos", "depth", "ref", "alt", "af"]
+    gaps        List of [position, gap_length]. Ex. [[1, 30], [1024, 600]]
+    """
+    for gap_pos, gap_len, in gaps:
+        depth_df["pos"] = depth_df.apply(
+                lambda i: i["pos"] + gap_len if i["pos"] >= gap_pos else i["pos"],
+                axis=1
+                )
 
-
-def make_depth_df(vcf_df, minor_threshold=0.1, gaps=None):
-    """Return df with reference depth and alternative depth"""
-    depth_list = [] # [A, T, C, G, noVar] for pos x
-    base_dict = {
-            'A': 1,
-            'T': 2,
-            'C': 3,
-            'G': 4,
-            'noVar': 5,
-            }
-    for index, row in vcf_df.iterrows():
-        if row['has_variant']:
-            entry = [int(row['pos']), 0, 0, 0, 0, 0]
-            base = row['ref']
-            base_index = base_dict[base]
-            depth = row['ads'][0]
-            entry[base_index] = depth
-            for i in range(len(row['ads'][1:])):
-                depth = row['ads'][i+1]
-                if depth/sum(row['ads']) > minor_threshold: # make parameter
-                    base = row['alt'][i]
-                    base_index = base_dict[base]
-                    entry[base_index] = depth
-        else:
-            entry = [int(row['pos']), 0, 0, 0, 0, row['ads'][0]]
-        entry.append(sum(row['ads']))
-        depth_list.append(entry)
-
-    if gaps:
-        gaps.sort(key=lambda x: x[0], reverse=True)
-        for pos, length in gaps:
-            for entry in depth_list:
-                if entry[0] >= pos:
-                    entry[0] += length
-            gap_entries = [[x, 0, 0, 0, 0, 0, np.nan] for x in range(pos, pos+length)]
-            depth_list = depth_list[:pos-1] + gap_entries + depth_list[pos-1:]
-
-    depth_df = pd.DataFrame(
-           depth_list,
-           columns=['pos', 'A', 'T', 'C', 'G', 'noVar', 'sum_depth'],
-           )
-
+    gap_insert = pd.DataFrame(
+            {
+                    "id": [merged_depth_df["id"][0]]*gap_len,
+                    "pos": [gap_pos+i for i in range(gap_len)],
+                    "depth":[np.nan]*gap_len
+                    }
+            )
+    merged_depth_df = pd.concat([merged_depth_df, gap_insert], ignore_index=True)
+    merged_depth_df = merged_depth_df.sort_values(by="pos", ignore_index=True)
+    merged_depth_df.reset_index()
     return depth_df
 
 
@@ -322,10 +298,17 @@ def main():
     args = get_args()
     with open(args.vcf_file) as vcf_file:
         vcf_df = parse_vcf(vcf_file)
-    vcf_df['has_variant'] = vcf_df.apply(
-            lambda x: find_variants(x['ads'], args.major, args.depth), axis=1
+    deep_vcf_df = vcf_df[vcf_df["af"] >= args.threshold]
+    depth_df = pd.read_csv(
+            args.depth_file,
+            sep="\t",
+            names=["id", "pos", "depth"]
             )
-    depth_df = make_depth_df(vcf_df, minor_threshold=args.minor, gaps=args.gap)
+    depth_df = depth_df.merge(deep_vcf_df, how="left")
+    if args.gaps:
+        depth_df = add_gaps(depth_df, args.gaps)
+    if args.extend:
+        depth_df = add_extension(depth_df, args.extend)
     variant_df, extended_variant_df = make_variant_df(depth_df, args.extend)
     if args.figure:
         colors = ['#5772B2', '#3A9276', '#F0430F', '#B615D6', '#DEE0E3']

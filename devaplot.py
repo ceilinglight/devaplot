@@ -7,7 +7,6 @@ import sys
 import numpy as np
 import pandas as pd
 
-
 from matplotlib import pyplot as plt
 
 def get_args():
@@ -248,7 +247,7 @@ def add_gaps(depth_df, gaps):
     Add regions with depth = 0 from a list of gaps and return updated DataFrame
     Parameters
     ----------
-    depth_df    DataFrame with ["id", "pos", "depth", "ref", "alt", "af"]
+    depth_df    DataFrame with ["id", "pos", "depth", "ref", "A", "T", "C", "G"]
     gaps        List of [position, gap_length]. Ex. [[1, 30], [1024, 600]]
     """
     for gap_pos, gap_len, in gaps:
@@ -256,84 +255,54 @@ def add_gaps(depth_df, gaps):
                 lambda i: i["pos"] + gap_len if i["pos"] >= gap_pos else i["pos"],
                 axis=1
                 )
-
-    gap_insert = pd.DataFrame(
-            {
-                    "id": [merged_depth_df["id"][0]]*gap_len,
-                    "pos": [gap_pos+i for i in range(gap_len)],
-                    "depth":[np.nan]*gap_len
-                    }
-            )
-    merged_depth_df = pd.concat([merged_depth_df, gap_insert], ignore_index=True)
-    merged_depth_df = merged_depth_df.sort_values(by="pos", ignore_index=True)
-    merged_depth_df.reset_index()
+        gap_insert = pd.DataFrame(
+                {
+                        "id": [depth_df["id"][0]]*gap_len,
+                        "pos": [gap_pos+i for i in range(gap_len)],
+                        "depth":[np.nan]*gap_len
+                        }
+                )
+        depth_df = pd.concat([depth_df, gap_insert], ignore_index=True)
+    depth_df = depth_df.sort_values(by="pos", ignore_index=True)
+    depth_df.reset_index()
     return depth_df
 
 
-def make_variant_df(depth_df, extend=4):
-    """Return two df with true variant depth and extended variant depth"""
-    variant_list = []
-    for index, row in depth_df.iterrows():
-        row = list(row)
-        row = row[:-1]
-        if row[-1]:
-            row[-1] = 100
-            variant_list.append(row)
-        else:
-            base_sum = sum(row[1:5])
-            entry = [row[0]]
-            for base in row[1:5]:
-                relative_depth = base/base_sum*100 if base_sum > 0 else 0
-                entry.append(relative_depth)
-            entry.append(0)
-            variant_list.append(entry)
-
-    extended_variant_list = list(variant_list)
-    if extend:
-        takeover_pos = []
-        for i, entry in enumerate(extended_variant_list):
-            if sum(entry[1:5]):
-                takeover_pos.append(i)
-        takeover_entry = [extended_variant_list[x] for x in takeover_pos]
-        for pos, entry in zip(takeover_pos, takeover_entry):
-            for i in range(-extend,extend+1):
-                extended_variant_list[pos+i] = entry
-
-    variant_df = pd.DataFrame(
-            variant_list,
-            columns=['pos', 'A', 'T', 'C', 'G', 'noVar'],
-            )
-
-    extended_variant_df = pd.DataFrame(
-            extended_variant_list,
-            columns=['pos', 'A', 'T', 'C', 'G', 'noVar'],
-            )
-
-    return variant_df, extended_variant_df
+def add_extension(depth_df, ex_len=4):
+    """
+    Return df with extended variant positions
+    Parameters
+    ----------
+    depth_df    DataFrame with ["id", "pos", "depth", "ref", "A", "T", "C", "G"]
+    ex_len      Number of position to extend upstream and downstream
+    """
+    var_df = depth_df[depth_df[list("ATCG")].any(axis=1)][["pos"]+list("ATCG")]
+    for i in var_df["pos"]:
+        stamp = depth_df.loc[depth_df["pos"] == i, list("ATCG")]
+        depth_df.loc[(depth_df["pos"] >= i-ex_len) & (depth_df["pos"] <= i+ex_len), list("ATCG")] = list(stamp.iloc[0])
+    return depth_df
 
 
 def main():
     """Plot please"""
     args = get_args()
     with open(args.vcf_file) as vcf_file:
-        vcf_df = parse_vcf(vcf_file)
-    deep_vcf_df = vcf_df[vcf_df["af"] >= args.threshold]
+        vcf_df = parse_vcf(vcf_file, args.threshold)
     depth_df = pd.read_csv(
             args.depth_file,
             sep="\t",
             names=["id", "pos", "depth"]
             )
-    depth_df = depth_df.merge(deep_vcf_df, how="left")
+    depth_df = depth_df.merge(vcf_df, how="left")
     if args.gaps:
         depth_df = add_gaps(depth_df, args.gaps)
-    if args.extend:
-        depth_df = add_extension(depth_df, args.extend)
-    variant_df, extended_variant_df = make_variant_df(depth_df, args.extend)
+    depth_df = add_extension(depth_df, args.extend)
+    # variant_df, extended_variant_df = make_variant_df(depth_df, args.extend)
     if args.figure:
-        colors = ['#5772B2', '#3A9276', '#F0430F', '#B615D6', '#DEE0E3']
+        colors = ['#5772B2', '#3A9276', '#F0430F', '#B615D6',] # '#DEE0E3']
         # fig = plt.figure(figsize=args.size)
         plt.rcParams["figure.dpi"] = args.dpi
-        ax = extended_variant_df.plot.bar(
+        ax = depth_df.plot.bar(
                 x='pos',
                 stacked=True,
                 color=colors,
@@ -342,7 +311,7 @@ def main():
                 width=1,
                 ylim=[0,100],
                 yticks=[0, 50, 100],
-                xticks=list(range(0, len(extended_variant_df), args.x_tick)),
+                xticks=list(range(0, len(depth_df), args.x_tick)),
                 # legend=False,
                 )
         ax2 = ax.twinx()

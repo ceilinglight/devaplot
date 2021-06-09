@@ -33,8 +33,7 @@ def get_args():
         return x
 
     parser.add_argument(
-            '-M',
-            '--major',
+            '--threshold',
             help='Threshold to include variant at position',
             type=float01,
             metavar='FLOAT',
@@ -100,7 +99,7 @@ def get_args():
 
     parser.add_argument(
             '-g',
-            '--gap',
+            '--gaps',
             help='Gap position and size',
             type=str,
             metavar='INT,INT[,INT,INT[,INT,INT,...]]',
@@ -131,12 +130,10 @@ def get_args():
             )
 
     parser.add_argument(
-            '-d',
-            '--depth',
-            help='Depth of position to report variant',
-            type=int,
-            metavar='INT',
-            default=20,
+            'depth_file',
+            help='Depth file from samtools',
+            type=str,
+            metavar='depth-file',
             )
 
     args = parser.parse_args()
@@ -176,9 +173,9 @@ def get_args():
         parser.error('Size must be integer')
 
     # Check gap
-    if args.gap:
+    if args.gaps:
         try:
-            gap = args.gap
+            gap = args.gaps
             gap = gap.split(',')
             gap = [float(x) for x in gap]
             gap_decimal = [x%1 for x in gap]
@@ -188,13 +185,9 @@ def get_args():
                 parser.error('Gap size missing')
             gap = [int(x) for x in gap]
             gap = [[gap[x], gap[x+1]] for x in range(0, len(gap), 2)]
-            args.gap = gap
+            args.gaps = gap
         except ValueError:
             parser.error('Gap must be integer')
-
-    # Check depth
-    if args.depth < 0:
-        parser.error('Depth argument must not be negative')
 
     return args
 
@@ -216,9 +209,9 @@ def parse_vcf(vcf_file, threshold):
         ref = line[3]
         alt = line[4]
         info = dict([
-                j 
-                if len(j)==2 
-                else j+[""] 
+                j
+                if len(j)==2
+                else j+[""]
                 for j in map(
                         lambda i: str.split(i, "="), line[7].split(";")
                         )
@@ -277,10 +270,11 @@ def add_extension(depth_df, ex_len=4):
     ex_len      Number of position to extend upstream and downstream
     """
     var_df = depth_df[depth_df[list("ATCG")].any(axis=1)][["pos"]+list("ATCG")]
+    extended_depth_df = depth_df.copy()
     for i in var_df["pos"]:
         stamp = depth_df.loc[depth_df["pos"] == i, list("ATCG")]
-        depth_df.loc[(depth_df["pos"] >= i-ex_len) & (depth_df["pos"] <= i+ex_len), list("ATCG")] = list(stamp.iloc[0])
-    return depth_df
+        extended_depth_df.loc[(depth_df["pos"] >= i-ex_len) & (depth_df["pos"] <= i+ex_len), list("ATCG")] = list(stamp.iloc[0])
+    return extended_depth_df
 
 
 def main():
@@ -296,28 +290,29 @@ def main():
     depth_df = depth_df.merge(vcf_df, how="left")
     if args.gaps:
         depth_df = add_gaps(depth_df, args.gaps)
-    depth_df = add_extension(depth_df, args.extend)
+    extended_depth_df = add_extension(depth_df, args.extend)
     # variant_df, extended_variant_df = make_variant_df(depth_df, args.extend)
     if args.figure:
         colors = ['#5772B2', '#3A9276', '#F0430F', '#B615D6',] # '#DEE0E3']
         # fig = plt.figure(figsize=args.size)
         plt.rcParams["figure.dpi"] = args.dpi
-        ax = depth_df.plot.bar(
+        ax = extended_depth_df.plot.bar(
                 x='pos',
+                y=list("ATCG"),
                 stacked=True,
                 color=colors,
                 figsize=args.size, #(10.5,0.75),
                 rot=30,
                 width=1,
-                ylim=[0,100],
-                yticks=[0, 50, 100],
+                ylim=[0.0,1.0],
+                yticks=[0.0, 0.50, 1.00],
                 xticks=list(range(0, len(depth_df), args.x_tick)),
-                # legend=False,
+                legend=False,
                 )
         ax2 = ax.twinx()
-        depth_df.plot.line(
+        extended_depth_df.plot.line(
                 x='pos',
-                y='sum_depth',
+                y='depth',
                 lw=0.5,
                 secondary_y=True,
                 # ylim=[1, max(list(depth_df['sum_depth']).remove(np.inf))],
@@ -332,11 +327,11 @@ def main():
         ax.figure.savefig(args.figure, bbox_inches='tight')
 
     if args.table_relative:
-        relative_variant_df = variant_df[
-                (variant_df['A'] > 0) | # or
-                (variant_df['T'] > 0) | # or
-                (variant_df['C'] > 0) | # or
-                (variant_df['G'] > 0)
+        relative_variant_df = depth_df[
+                (depth_df['A'] > 0) |
+                (depth_df['T'] > 0) |
+                (depth_df['C'] > 0) |
+                (depth_df['G'] > 0)
                 ]
         relative_variant_df.to_csv(
                 args.table_relative,
@@ -344,18 +339,6 @@ def main():
                 index=False,
                 )
 
-    if args.table_absolute:
-        absolute_variant_df = depth_df[
-                (depth_df['A'] > 0) |
-                (depth_df['T'] > 0) |
-                (depth_df['C'] > 0) |
-                (depth_df['G'] > 0)
-                ]
-        absolute_variant_df.to_csv(
-                args.table_absolute,
-                columns=['pos', 'A', 'T', 'C', 'G'],
-                index=False,
-                )
 
 if __name__ == "__main__":
     main()

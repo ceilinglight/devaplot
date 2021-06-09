@@ -200,27 +200,46 @@ def get_args():
     return args
 
 
-def parse_vcf(vcf_file):
+def parse_vcf(vcf_file, threshold):
     """
     Read VCF file and return vcf dataframe
-    Extract pos, ref, alt, and DP4
+    Extract pos, ref, A, T, C, G
     """
-    vcf_lines = [line.rstrip().split() for line in vcf_file if line[0] != '#' and "INDEL" not in line]
-    pos = [int(line[1]) for line in vcf_lines]
-    refs = [line[3] for line in vcf_lines]
-    alts = [line[4].split(',') for line in vcf_lines] # nested list
-    info = [dict(
-            [j if len(j)==2 else j+[""] for j in map(lambda i: str.split(i, "="), line[7].split(";"))]
-            ) for line in vcf_lines
+    vcf_lines = [
+            line.rstrip().split() 
+            for line in vcf_file 
+            if line[0] != '#' and "INDEL" not in line
             ]
-    af = [line["AF"] for line in info]
-    vcf_df = pd.DataFrame({
-            'pos': pos,
-            'ref': refs,
-            'alt': alts,
-            'af': af,
-            })
-    vcf_df["af"] = pd.to_numeric(vcf_df["af"])
+    vcf_dict = {}
+
+    for line in vcf_lines:
+        pos = int(line[1])
+        ref = line[3]
+        alt = line[4]
+        info = dict([
+                j 
+                if len(j)==2 
+                else j+[""] 
+                for j in map(
+                        lambda i: str.split(i, "="), line[7].split(";")
+                        )
+                ])
+        af = float(info["AF"])
+        vcf_value = vcf_dict.get(pos, [])
+        if not vcf_value:
+            vcf_value = [pos, ref, 0, 0, 0, 0]
+        if af >= threshold:
+            vcf_value["ATCG".index(alt)+2] = af
+            vcf_dict[pos] = vcf_value
+
+    vcf_df = pd.DataFrame.from_dict(
+            vcf_dict,
+            orient="index",
+            columns=["pos", "ref", "A", "T", "C", "G"]
+            )
+
+    for nuc in "ATCG":
+        vcf_df.loc[vcf_df["ref"] == nuc, nuc] = 1 - vcf_df[vcf_df["ref"] == nuc][list("ATCG".replace(nuc, ""))].sum(axis=1)
     return vcf_df
 
 
